@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "utils.h"
+#include "ulog.h"
 
 #define foreach_arg(_arg, _addr, _len, _first_addr, _first_len) \
 	for (_addr = (_first_addr), _len = (_first_len); \
@@ -158,7 +159,7 @@ void cbuf_free(void *ptr, unsigned int order)
 	munmap(ptr, cbuf_size(order) * 2);
 }
 
-int mkdir_p(char *dir, mode_t mask)
+static int _mkdir_p(char *dir, mode_t mask)
 {
 	char *l;
 	int ret;
@@ -187,3 +188,10 @@ int mkdir_p(char *dir, mode_t mask)
 	else
 		return -1;
 }
+
+int mkdir_p(char *dir, mode_t mask) {
+    int res = _mkdir_p(dir, mask);
+    ulog(LOG_INFO, "Making directory '%s': res = %d, error: %m\n", dir, res);
+    return res;
+} 
+ 

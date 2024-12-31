@@ -143,6 +143,9 @@ static inline void uloop_end(void)
 }
 
 int uloop_init(void);
+/* precondition: timeout in milliseconds or <= 0 if no global timeout expected.
+	do not call more than once with timeout>0. It is meaningless and lead to broken timeouts list
+	With timeout=0 means to get all events available so far and exit */
 int uloop_run_timeout(int timeout);
 static inline int uloop_run(void)
 {

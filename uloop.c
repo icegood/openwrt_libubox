@@ -62,6 +62,7 @@ static struct list_head signals = LIST_HEAD_INIT(signals);
 
 static int poll_fd = -1;
 bool uloop_cancelled = false;
+bool global_current_uloop_timeout_reached = false;
 bool uloop_handle_sigchld = true;
 static int uloop_status = 0;
 static volatile sig_atomic_t do_sigchld = 0;
@@ -614,25 +615,23 @@ int uloop_get_next_timeout(void)
 	return diff;
 }
 
-static void uloop_process_timeouts(void)
+static int64_t uloop_process_timeouts(struct timeval *tv)
 {
 	struct uloop_timeout *t;
-	struct timeval tv;
+	int64_t res;
 
-	if (list_empty(&timeouts))
-		return;
-
-	uloop_gettime(&tv);
 	while (!list_empty(&timeouts)) {
 		t = list_first_entry(&timeouts, struct uloop_timeout, list);
 
-		if (tv_diff(&t->time, &tv) > 0)
-			break;
+		res = tv_diff(&t->time, tv);
+		if (res > 0)
+			return res;
 
 		uloop_timeout_cancel(t);
 		if (t->cb)
 			t->cb(t);
 	}
+	return -1;
 }
 
 static void uloop_clear_timeouts(void)
@@ -656,29 +655,52 @@ bool uloop_cancelling(void)
 	return uloop_run_depth > 0 && uloop_cancelled;
 }
 
+static void handle_global_timeout(struct uloop_timeout *timeout) {
+	global_current_uloop_timeout_reached = true;
+}
+
 int uloop_run_timeout(int timeout)
 {
-	int next_time = 0;
+	int64_t next_time = 0;
+	
+	struct timeval tv;
 
 	uloop_run_depth++;
 
-	uloop_status = 0;
-	uloop_cancelled = false;
-	do {
-		uloop_process_timeouts();
+	if (timeout > 0) {
+		static struct uloop_timeout uloop_global_timer = {
+			.cb = &handle_global_timeout
+		};
+		uloop_timeout_set(&uloop_global_timer, timeout);
+		global_current_uloop_timeout_reached = false;
+	} else if (timeout == 0) {
+		global_current_uloop_timeout_reached = true;
+	}
 
+	uloop_status = 0;
+	do {
 		if (do_sigchld)
 			uloop_handle_processes();
 
 		if (uloop_cancelled)
 			break;
+		
+		uloop_gettime(&tv);
+		next_time = uloop_process_timeouts(&tv);
 
-		next_time = uloop_get_next_timeout();
-		if (timeout >= 0 && (next_time < 0 || timeout < next_time))
-				next_time = timeout;
+		if (timeout == 0) {
+			// whatever asked by uloop_process_timeouts is overriden
+			// to return uloop_run_events immediately:
+			next_time = 0; 
+		}
+
+		if (uloop_cancelled)
+			break;
+
 		uloop_run_events(next_time);
-	} while (!uloop_cancelled && timeout < 0);
+	} while ((!uloop_cancelled) && (!global_current_uloop_timeout_reached));
 
+	global_current_uloop_timeout_reached = false; // reset back for upper level of uloop
 	--uloop_run_depth;
 
 	return uloop_status;
