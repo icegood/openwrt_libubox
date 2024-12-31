@@ -61,6 +61,7 @@ static struct list_head signals = LIST_HEAD_INIT(signals);
 
 static int poll_fd = -1;
 bool uloop_cancelled = false;
+bool global_current_uloop_timeout_reached = false;
 bool uloop_handle_sigchld = true;
 static int uloop_status = 0;
 static bool do_sigchld = false;
@@ -592,46 +593,23 @@ int uloop_signal_delete(struct uloop_signal *s)
 	return 0;
 }
 
-int uloop_get_next_timeout(void)
-{
-	struct uloop_timeout *timeout;
-	struct timeval tv;
-	int64_t diff;
-
-	if (list_empty(&timeouts))
-		return -1;
-
-	uloop_gettime(&tv);
-
-	timeout = list_first_entry(&timeouts, struct uloop_timeout, list);
-	diff = tv_diff(&timeout->time, &tv);
-	if (diff < 0)
-		return 0;
-	if (diff > INT_MAX)
-		return INT_MAX;
-
-	return diff;
-}
-
-static void uloop_process_timeouts(void)
+static int64_t uloop_process_timeouts(struct timeval *tv)
 {
 	struct uloop_timeout *t;
-	struct timeval tv;
+	int64_t res;
 
-	if (list_empty(&timeouts))
-		return;
-
-	uloop_gettime(&tv);
 	while (!list_empty(&timeouts)) {
 		t = list_first_entry(&timeouts, struct uloop_timeout, list);
 
-		if (tv_diff(&t->time, &tv) > 0)
-			break;
+		res = tv_diff(&t->time, tv);
+		if (res > 0)
+			return res;
 
 		uloop_timeout_cancel(t);
 		if (t->cb)
 			t->cb(t);
 	}
+	return -1;
 }
 
 static void uloop_clear_timeouts(void)
@@ -655,29 +633,45 @@ bool uloop_cancelling(void)
 	return uloop_run_depth > 0 && uloop_cancelled;
 }
 
+static void handle_global_timeout(struct uloop_timeout *timeout) {
+	global_current_uloop_timeout_reached = true;
+}
+
 int uloop_run_timeout(int timeout)
 {
-	int next_time = 0;
+	int64_t next_time = 0;
+	struct uloop_timeout uloop_global_timer;
+	
+	struct timeval tv;
 
 	uloop_run_depth++;
 
-	uloop_status = 0;
-	uloop_cancelled = false;
-	do {
-		uloop_process_timeouts();
+	if (timeout >= 0) {
+		uloop_global_timer.cb = &handle_global_timeout;
+		uloop_timeout_set(&uloop_global_timer, timeout);
+	}
 
+	uloop_status = 0;
+	global_current_uloop_timeout_reached = false;
+	do {
 		if (do_sigchld)
 			uloop_handle_processes();
 
 		if (uloop_cancelled)
 			break;
+		
+		uloop_gettime(&tv);
+		next_time = uloop_process_timeouts(&tv);
 
-		next_time = uloop_get_next_timeout();
-		if (timeout >= 0 && (next_time < 0 || timeout < next_time))
-				next_time = timeout;
-		uloop_run_events(next_time);
-	} while (!uloop_cancelled && timeout < 0);
+		if (uloop_cancelled)
+			break;
 
+		if (next_time >= 0) {
+			uloop_run_events(next_time);
+		}
+	} while ((!uloop_cancelled) && (!global_current_uloop_timeout_reached));
+
+	global_current_uloop_timeout_reached = false; // reset back for upper level of uloop
 	--uloop_run_depth;
 
 	return uloop_status;
