@@ -194,7 +194,11 @@ void udebug_free(struct udebug *ctx);
 
 static inline bool udebug_is_connected(struct udebug *ctx)
 {
+#ifdef WITH_UDEBUG
 	return ctx->fd.fd >= 0;
+#else
+	return true;
+#endif
 }
 
 int udebug_id_cmp(const void *k1, const void *k2, void *ptr);

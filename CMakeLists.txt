@@ -18,11 +18,22 @@ INCLUDE(FindPkgConfig)
 PKG_SEARCH_MODULE(JSONC json-c REQUIRED)
 INCLUDE_DIRECTORIES(${JSONC_INCLUDE_DIRS})
 
-SET(SOURCES avl.c avl-cmp.c blob.c blobmsg.c uloop.c usock.c ustream.c ustream-fd.c vlist.c utils.c safe_list.c runqueue.c md5.c kvlist.c ulog.c base64.c udebug.c udebug-remote.c)
+SET(SOURCES avl.c avl-cmp.c blob.c blobmsg.c uloop.c usock.c ustream.c ustream-fd.c vlist.c utils.c safe_list.c runqueue.c md5.c kvlist.c ulog.c base64.c)
+
+IF(WITH_UDEBUG)
+	list(APPEND SOURCES udebug.c udebug-remote.c)
+ELSE()
+	list(APPEND SOURCES udebug_stub.c)
+ENDIF(WITH_UDEBUG)
 
 ADD_LIBRARY(ubox SHARED ${SOURCES})
 ADD_LIBRARY(ubox-static STATIC ${SOURCES})
 SET_TARGET_PROPERTIES(ubox-static PROPERTIES OUTPUT_NAME ubox)
+
+IF(WITH_UDEBUG)
+	target_compile_definitions(ubox PRIVATE -DWITH_UDEBUG)
+	target_compile_definitions(ubox-static PRIVATE -DWITH_UDEBUG)
+ENDIF(WITH_UDEBUG)
 
 SET(LIBS)
 CHECK_FUNCTION_EXISTS(clock_gettime HAVE_GETTIME)
