@@ -26,7 +26,7 @@
 
 static int _ulog_channels = -1;
 static int _ulog_facility = -1;
-static int _ulog_threshold = LOG_DEBUG;
+static int _ulog_threshold = LOG_INFO;
 static int _ulog_initialized = 0;
 static const char *_ulog_ident = NULL;
 static struct udebug_buf *udb = NULL;
@@ -82,8 +82,14 @@ static void ulog_defaults(void)
 	if (_ulog_ident == NULL && _ulog_channels != ULOG_STDIO)
 		_ulog_ident = ulog_default_ident();
 
-	if (_ulog_channels & ULOG_SYSLOG)
-		openlog(_ulog_ident, 0, _ulog_facility);
+	if (_ulog_channels & ULOG_SYSLOG) {
+		int options = LOG_PID;
+		if ((_ulog_channels & ULOG_STDIO) == 0) {
+			// last resort to console even if disabled
+			options |= LOG_CONS;
+		}
+		openlog(_ulog_ident, options, _ulog_facility);
+	}
 
 	_ulog_initialized = 1;
 }
@@ -133,6 +139,7 @@ void ulog_open(int channels, int facility, const char *ident)
 	_ulog_channels = channels;
 	_ulog_facility = facility;
 	_ulog_ident = ident;
+	ulog_defaults();
 }
 
 void ulog_close(void)
@@ -165,8 +172,6 @@ void ulog(int priority, const char *fmt, ...)
 
 	if (priority > _ulog_threshold)
 		return;
-
-	ulog_defaults();
 
 	if (_ulog_channels & ULOG_KMSG)
 	{
